@@ -1,7 +1,7 @@
 // server.js
 import express from 'express';
 import session from 'express-session';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs'; // تغییر داده شده از bcrypt به bcryptjs
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -23,10 +23,9 @@ app.use(session({
   saveUninitialized: false,
 }));
 
-// فایل‌های استاتیک
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ایجاد جداول اگر وجود نداشتند
+// ساخت جداول اگر وجود ندارند
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +45,7 @@ db.serialize(() => {
     FOREIGN KEY(receiver_id) REFERENCES users(id)
   )`);
 
-  // یک ادمین نمونه بساز اگر نیست
+  // ساخت ادمین اولیه در صورت نبود
   db.get("SELECT * FROM users WHERE role='admin'", (err, row) => {
     if (!row) {
       const hashed = bcrypt.hashSync('admin123', 10);
@@ -56,13 +55,11 @@ db.serialize(() => {
   });
 });
 
-// میدلور چک لاگین
 function requireLogin(req, res, next) {
   if (!req.session.user) return res.status(401).send('لطفا وارد شوید');
   next();
 }
 
-// میدلور چک ادمین
 function requireAdmin(req, res, next) {
   if (!req.session.user || req.session.user.role !== 'admin') return res.status(403).send('دسترسی غیرمجاز');
   next();
@@ -111,12 +108,12 @@ app.get('/logout', (req, res) => {
   });
 });
 
-// اطلاعات پروفایل کاربر لاگین شده
+// پروفایل
 app.get('/profile', requireLogin, (req, res) => {
   res.json(req.session.user);
 });
 
-// دریافت لیست کاربران (برای نمایش در لیست گیرندگان پیام)
+// لیست کاربران
 app.get('/users', requireLogin, (req, res) => {
   db.all('SELECT id, username, role FROM users', (err, rows) => {
     if (err) return res.status(500).send('خطا در دریافت کاربران');
@@ -124,10 +121,9 @@ app.get('/users', requireLogin, (req, res) => {
   });
 });
 
-// دریافت پیام‌ها (عمومی + خصوصی مربوط به کاربر)
+// دریافت پیام‌ها
 app.get('/messages', requireLogin, (req, res) => {
   const userId = req.session.user.id;
-
   const sql = `
     SELECT * FROM messages
     WHERE receiver_id IS NULL
@@ -135,14 +131,13 @@ app.get('/messages', requireLogin, (req, res) => {
     OR receiver_id = ?
     ORDER BY created_at ASC
   `;
-
   db.all(sql, [userId, userId], (err, rows) => {
     if (err) return res.status(500).send('خطا در دریافت پیام‌ها');
     res.json(rows);
   });
 });
 
-// ارسال پیام جدید
+// ارسال پیام
 app.post('/message', requireLogin, (req, res) => {
   const sender_id = req.session.user.id;
   const sender = req.session.user.username;
@@ -157,27 +152,16 @@ app.post('/message', requireLogin, (req, res) => {
   });
 });
 
-// حذف پیام توسط ادمین
+// حذف پیام (ادمین)
 app.delete('/message/:id', requireLogin, requireAdmin, (req, res) => {
   const messageId = req.params.id;
-
-  // ابتدا چک می‌کنیم پیام وجود دارد یا خیر
   db.get('SELECT * FROM messages WHERE id = ?', [messageId], (err, row) => {
-    if (err) {
-      return res.status(500).send('خطا در سرور');
-    }
-    if (!row) {
-      return res.status(404).send('پیام پیدا نشد');
-    }
+    if (err) return res.status(500).send('خطا در سرور');
+    if (!row) return res.status(404).send('پیام پیدا نشد');
 
-    // پیام وجود دارد، حالا حذفش می‌کنیم
     db.run('DELETE FROM messages WHERE id = ?', [messageId], function(err2) {
-      if (err2) {
-        return res.status(500).send('خطا در حذف پیام');
-      }
-      if (this.changes === 0) {
-        return res.status(404).send('پیام حذف نشد');
-      }
+      if (err2) return res.status(500).send('خطا در حذف پیام');
+      if (this.changes === 0) return res.status(404).send('پیام حذف نشد');
       res.send('پیام حذف شد');
     });
   });
